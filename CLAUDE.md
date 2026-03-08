@@ -8,6 +8,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 pnpm dev    # 開発サーバー (http://localhost:3000)
 pnpm build
 pnpm lint
+pnpm format
 ```
 
 ## 構造

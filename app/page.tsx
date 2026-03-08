@@ -1,3 +1,5 @@
+import Link from "next/link";
+
 const phases = [
 	{
 		phase: 1,
@@ -77,7 +79,7 @@ export default function Home() {
 							<ul className="flex flex-col gap-2">
 								{sections.map((section) => (
 									<li key={section.href}>
-										<a
+										<Link
 											href={section.href}
 											className="flex items-center justify-between rounded-lg border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 px-4 py-3 text-sm text-zinc-700 dark:text-zinc-300 transition-colors hover:bg-zinc-50 dark:hover:bg-zinc-800 hover:text-zinc-900 dark:hover:text-zinc-50"
 										>
@@ -85,7 +87,7 @@ export default function Home() {
 											<span className="text-zinc-300 dark:text-zinc-600">
 												→
 											</span>
-										</a>
+										</Link>
 									</li>
 								))}
 							</ul>
