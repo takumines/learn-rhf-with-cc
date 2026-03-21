@@ -129,4 +129,70 @@
 
 ---
 
+## Phase 3: 深堀り
+
+### 3-1. 非制御コンポーネントの仕組みと再レンダリング戦略
+
+- **React Strict Mode が開発時のカウントを増やす2つの仕組み**
+  1. レンダー関数の二重呼び出し（副作用の検出）→ 全コンポーネントに +1
+  2. エフェクトの二重実行（mount → cleanup → remount）→ `useEffect` を持つコンポーネントに +2
+  `useForm` は内部で `useEffect` を使って初期化するため、開発環境では Strict Mode により初回レンダーが 4 回になる。本番では 1 回。
+
+- **`mode` オプションとレンダリングの関係**
+
+  | mode | 再レンダーが走るタイミング |
+  |------|--------------------------|
+  | `'onSubmit'`（デフォルト） | 送信時のみ |
+  | `'onBlur'` | フォーカスアウト時 |
+  | `'onChange'` | 入力のたびに |
+
+  `'onChange'` が `useState` と同じ頻度に見えるのは、`formState.errors` / `isValid` の更新が再レンダーを引き起こすため。入力値そのものは React state を経由しないが、バリデーション結果は経由する。
+
+- **`React.memo` が効くのは「下流の子コンポーネント保護」だけ**
+  `useForm` を呼んでいるコンポーネント自体を `memo` 化しても、内部 state（`formState`）の変化は止められない。`memo` の効果は「親からの再レンダーを止める」こと。フィールドを子コンポーネントに切り出して `memo` 化すると、エラーが出たフィールドだけが再レンダーされ、他は保護される。
+
+- **`register()` の参照が安定している理由**
+  RHF は入力値を `useRef` に保持しており、`register` が返す `onChange`/`onBlur`/`ref` の参照はマウント時に一度生成されたまま変わらない。これにより `memo` 化した子コンポーネントへの props が安定し、`useCallback` なしでも再レンダーを防げる。
+
+### 3-2. Zod との連携（`@hookform/resolvers/zod`）
+
+- **`z.infer<typeof schema>` で型とバリデーションを1ソースに統一**
+  `type FormValues = z.infer<typeof registerSchema>` とすると、スキーマを変更するだけで型が自動追随する。`register("fieldName")` の `fieldName` もスキーマのキーと一致しないとコンパイルエラーになるため、フィールド名の打ち間違いをコンパイル時に検出できる。
+
+- **スキーマレベルの `.refine()` で `mode: "onBlur"` + クロスフィールド問題を解消**
+  `zodResolver` はバリデーション時にスキーマ全体を評価する。フィールドレベルの `validate` では `confirmPassword` のバリデーションは `confirmPassword` がblurされた時しか走らないが、Zod のスキーマレベル `.refine()` を使うと `password` がblurされた時も `confirmPassword` の一致チェックが走る。`trigger()` による手動再検証が不要になる。
+
+- **チェーンした `.refine()` はシリアル実行（直列）**
+  ```ts
+  z.string()
+    .refine((v) => /[A-Z]/.test(v), "大文字を含む")
+    .refine((v) => /[a-z]/.test(v), "小文字を含む")
+  ```
+  最初の `.refine()` が失敗した時点でそれ以降は評価されず、エラーは1つだけ返る。複数エラーを同時に表示したい場合は `.superRefine()` を使う。
+
+- **Zod v4 の `z.email()` ショートハンド**
+  `z.string().email()` の代わりに `z.email()` と書けるのは Zod v4 の機能。既存の Zod v3 コードベースに混在させると動作しないため、バージョンを確認してから使う。
+
+### 3-3. `useFormContext` / フォームの分割設計
+
+- **`FormProvider` は `useForm()` の返り値をそのまま Context に格納する**
+  `<FormProvider {...methods}>` の `...methods` スプレッドで `register`・`handleSubmit`・`control`・`formState` 等が Context に注入される。`useFormContext()` はそれを取り出すだけで、メソッドのコピーや再生成は行わない。参照の安定性は `useForm` を直接使う場合と変わらない。
+
+- **ネストしたフィールド名のドット記法**
+  `register("personal.firstName")` と書くと送信データが `{ personal: { firstName: "..." } }` のネスト構造になる。`FormValues` 型の構造と対応しているため TypeScript の補完と型チェックが効き、フィールド名の打ち間違いをコンパイル時に検出できる。
+
+- **`pattern` バリデーションは部分一致に注意**
+  RHF の `register` の `pattern` は内部で `RegExp.test()` を使うため、アンカーなしの正規表現は部分一致になる。
+  ```ts
+  // ❌ "abc123-4567xyz" も通る（部分一致）
+  pattern: { value: /\d{3}-?\d{4}/ }
+  // ✅ 完全一致
+  pattern: { value: /^\d{3}-?\d{4}$/ }
+  ```
+
+- **フォームを分割するメリットは「関心の分離」**
+  `PersonalSection` は個人情報に、`AddressSection` は住所にだけ関心を持つ。セクションごとに独立してテスト・修正でき、フォームが大きくなるほどこの恩恵が増す。
+
+---
+
 *フェーズを進めるたびに更新していく。*
